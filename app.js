@@ -25,14 +25,6 @@ db.once('open', function() {
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
-app.get('/ping', function (req, res) {
-    return res.status(200).send('pong');
-});
-
-app.get('/secretping', tokenizer.check, function (req, res) {
-    return res.status(200).send('secretpong');
-});
-
 app.get('/login', async function (req, res) {
     const user = await User.findOne({username: req.query.user});
     
@@ -67,27 +59,6 @@ app.post('/register', async function (req, res) {
     } catch(err) {
         res.status(400).json({ message: err.message });
     }
-    return;
-    // jwt.sign({user: req.query.user, pass: req.query.pass}, 'secretkey', (err, token) => {
-    //     console.log(token);
-    // });
-    User.findOne({username: req.query.user}).exec(function (err, user) {
-        if(user) {
-            res.status(400).json({ message: 'User already exists', user: user });
-        } else {
-
-            const user = new User({
-                _id: new mongoose.Types.ObjectId(),
-                username: req.query.user,
-                pass: req.query.pass,
-                name: req.query.name,
-            });
-            user.save().then(result => {
-                console.log('Nuevo usuario', result);
-            }).catch(err => console.log(err));
-            res.status(200).json({ message: 'User created' });
-        }
-    });
 });
 
 app.get('/getAllTasks', tokenizer.check, function (req, res) {
