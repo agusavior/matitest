@@ -1,8 +1,10 @@
 var express = require('express');
 var mongoose = require('mongoose');
-var jwt = require('jsonwebtoken');
 var app = express();
+var bodyParser = require('body-parser');
+var tokenizer = require('./tokenizer');
 
+// Constantes:
 const MONGO_ATLAS_PASSWORD = 'aWCS8CGePfYkF0dgaFod';
 
 const User = require('./models/user');
@@ -19,31 +21,53 @@ db.once('open', function() {
   console.log('Conectado a MongoDB!');
 });
 
-app.get('/login', function (req, res) {
-    User.findOne({username: req.query.user}).exec(function (err, user) {
-        if(user) {
-            //res.status(200).send('Ok.\nToken: ' + user.token + '\nName:' + user.name);
-            if(user.pass === req.query.pass) {
-                res.status(200).json({
-                    token: user.token,
-                    name: user.name
-                });
-            } else {
-                res.status(400).json({ message: 'Invalid password' });
-            }
+// Esto es porque no podia enviar un body sin esto.
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
 
-        } else {
-            res.status(400).json({ message: 'Username does not exist' });
-        }
-    });
+app.get('/ping', function (req, res) {
+    return res.status(200).send('pong');
 });
 
-// Retorna un número muy grande al azar.
-function generateRandomToken() {
-    return Math.floor(Math.random() * 1000000000000000);
-}
+app.get('/secretping', tokenizer.check, function (req, res) {
+    return res.status(200).send('secretpong');
+});
 
-app.get('/register', function (req, res) {
+app.get('/login', async function (req, res) {
+    const user = await User.findOne({username: req.query.user});
+    
+    console.log('user', user, req.body)
+
+    if(user == undefined) {
+        return res.status(409).json({ message: 'No user finded.' });
+    }
+
+    if(req.body == undefined) {
+        return res.status(409).json({ message: 'Undefined body.' });
+    }
+
+    if(user.pass != req.body.pass) {
+        console.log(user.pass, '!=' , req.body.pass)
+        return res.status(401).json({ message: 'Unauthorized.' });
+    }
+
+    // Generamos el token, solo con el ID del usuario
+    const token =  tokenizer.sign({
+        userId: user._id,
+    });
+
+    return res.status(201).json({ message: 'Login successful.', token, name: user.name });
+});
+
+app.post('/register', async function (req, res) {
+    const user = new User(req.body);
+    try {
+        await user.save();
+        res.status(200).json({ message: 'User registered successfully.' });
+    } catch(err) {
+        res.status(400).json({ message: err.message });
+    }
+    return;
     // jwt.sign({user: req.query.user, pass: req.query.pass}, 'secretkey', (err, token) => {
     //     console.log(token);
     // });
@@ -57,7 +81,6 @@ app.get('/register', function (req, res) {
                 username: req.query.user,
                 pass: req.query.pass,
                 name: req.query.name,
-                token: generateRandomToken()
             });
             user.save().then(result => {
                 console.log('Nuevo usuario', result);
@@ -67,17 +90,7 @@ app.get('/register', function (req, res) {
     });
 });
 
-function assertToken(req, res, next) {
-    User.findOne({token: parseInt(req.params.token)}).exec(function (err, user) {
-        if(user) {
-            next();
-        } else {
-            res.status(401).json({ message: 'Invalid Token' });
-        }
-    });
-}
-
-app.get('/token/:token/getAllTasks', assertToken, function (req, res) {
+app.get('/getAllTasks', tokenizer.check, function (req, res) {
     Task.find().exec().then(docs => {
         res.status(200).json(docs);
     })
@@ -88,56 +101,54 @@ app.get('/token/:token/getAllTasks', assertToken, function (req, res) {
     });
 });
 
-app.get('/token/:token/createTask', assertToken, function (req, res) {
-    
-    const task = new Task({
-        _id: new mongoose.Types.ObjectId(),
-        title: req.query.title,
-        stars: parseInt(req.query.stars),
-        done: (req.query.done == 'true'),
-        color: req.query.color
-    });
-    task.save().then(result => {
-        console.log('Nuevo usuario', result);
-    }).catch(err => console.log(err));
-
-    res.status(200).json({ task: task });
+app.post('/createTask', tokenizer.check, async function (req, res) {
+    const task = new Task(req.body);
+    try {
+        await task.save();
+        res.status(200).json({ message: 'Created successfully.', task: task });
+    } catch(err) {
+        res.status(400).json({ message: 'Invalid format.' });
+    }
 });
 
-app.get('/token/:token/modifyTask/:id', assertToken, function (req, res) {
-    Task.findByIdAndUpdate(req.params.id, {
-        title: req.query.title,
-        stars: parseInt(req.query.stars),
-        done: (req.query.done == 'true'),
-        color: req.query.color
-    }, {new: true}, function(err, model) {
-        if(model) {
-            res.status(200).json( model );
-        } else {
-            res.status(400).json({ message: 'There are not tasks with that id' });
-        }
-    });
+// Este es un middleware para verificar que la ID del Task tiene el formato correcto para
+// ser admitido por mongoose.
+const checkValidId = (req, res, next) => {
+    if(!req.params.id.match(/^[0-9a-fA-F]{24}$/)) {
+        return res.status(400).json({ message: 'Bad id.' });
+    }
+    next();
+}
+
+// Este es un middleware que obtiene el task y lo guarda en req.task para
+// ser usado posteriormente.
+const getTask = async (req, res, next) => {
+    const task = await Task.findById(req.params.id);
+
+    // Si no existe el task con dicha ID, avisa.
+    if(!task) {
+        return res.status(400).json({ message: 'There are not tasks with that id.' });
+    }
+
+    req.task = task;
+
+    next();
+}
+
+
+app.get('/getTask/:id', tokenizer.check, checkValidId, getTask, function (req, res) {
+    res.status(200).json({ task: req.task });
 });
 
-
-app.get('/token/:token/getTask/:id', assertToken, function (req, res) {
-    Task.findById(req.params.id).exec(function (err, task) {
-        if(task) {
-            res.status(200).json(task);
-        } else {
-            res.status(400).json({ message: 'There are not tasks with that id' });
-        }
-    });
+app.delete('/removeTask/:id', tokenizer.check, checkValidId, getTask, async function (req, res) {
+    await Task.deleteOne({_id: req.task._id});
+    res.status(200).json({ message: 'Removed successfully.', task: req.task });
 });
 
-app.get('/token/:token/removeTask/:id', assertToken, function (req, res) {
-    Task.findByIdAndDelete(req.params.id).exec(function (err, doc) {
-        if(doc) {
-            res.status(200).json({ message: 'Deleted', doc: doc, err: err });
-        } else {
-            res.status(400).json({ message: 'There are not tasks with that id', doc: doc, err: err });
-        }
-    });
+app.put('/modifyTask/:id', tokenizer.check, checkValidId, getTask, async function (req, res) {
+    await Task.updateOne({_id: req.task._id}, req.body);
+    const newTask = await Task.findById(req.task._id);
+    res.status(200).json({ message: 'Edited successfully.', oldtask: req.task, newtask: newTask });
 });
 
 app.get('/users', function (req, res) {
@@ -152,10 +163,11 @@ app.get('/users', function (req, res) {
                 error: err,
             });
         });
+});
 
-    //console.log('req.body.id:', req.query.id);
-    //const user = User.findById(req.query.id);
-    //res.send(user);
+app.delete('/removeAllUsers', async function (req, res) {
+    await User.remove({});
+
 });
 
 app.listen(3000, function () {
