@@ -157,24 +157,10 @@ app.put('/modifyTask/:id', checkIfBodyExists, tokenizer.check, checkValidId, get
     res.status(200).json({ message: 'Edited successfully.', oldtask: req.task, newtask: newTask });
 });
 
-/*
-app.get('/users', function (req, res) {
-    console.log('users,,')
-    User.find()
-        .exec()
-        .then(docs => {
-            res.status(200).json(docs);
-        })
-        .catch(err => {
-            res.status(500).json({
-                error: err,
-            });
-        });
-});
-
-app.delete('/removeAllUsers', async function (req, res) {
-    await User.remove({});
-});*/
+// Por las dudas, una página de inicio:
+app.get('/', function (req, res) {
+    res.status(200).json({ message: 'Server is running.' });
+})
 
 // Iniciamos el servidor...
 app.listen(3000, function () {
