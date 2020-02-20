@@ -7,7 +7,7 @@ Correr los siguientes comandos:
 ```
 $ npm install
 
-$ npm run install
+$ npm run start
 ```
 
 El servidor se iniciará en http://localhost:3000/
